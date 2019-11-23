@@ -31,7 +31,15 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
         Boxes.__init__(self)
 
         self.addSettingsArgs(edges.FingerJointSettings)
-        
+
+        self.argparser.add_argument("--banana-socket-diameter", action="store",
+            type=float, default=8.0,
+            help="diameter of the banana socket mounting holes")
+
+        self.argparser.add_argument("--flipswitch-diameter", action="store",
+            type=float, default=6.3,
+            help="diameter of the flipswitch mounting hole")
+
 
     def side(self, l, h=14, move=None):
         t = self.thickness
@@ -43,7 +51,7 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
         self.moveTo(t, 0)
         self.polyline(h, 90, l-h/3**0.5, 60, h*2/3**0.5, 120)
         self.edges["f"](l)
-        
+
         self.move(tw, th, move)
 
     def side2(self, l, h=14, move=None):
@@ -59,7 +67,7 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
             self.polyline(h, 90, l-50, 90, h-6, -90)
         self.polyline(11, 90, 1, -90, 27, (90, 1),
                       3, (90, 1), l-12, 90)
-        
+
         self.move(tw, th, move)
 
 
@@ -71,17 +79,18 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
         self.fingerHolesAt(m-30.5-0.5*t, 0, self.l)
         self.fingerHolesAt(m+30.5+0.5*t, 0, self.l)
 
-        #self.rectangularHole(m-19, 23, 0.8, 6.25)
-        #self.rectangularHole(m+19, 23, 0.8, 6.25)
         self.rectangularHole(m-19, 34, 0.8, 6.25)
         self.rectangularHole(m+19, 34, 0.8, 6.25)
 
         self.rectangularHole(m, -2.5, 35, 5)
 
     def front(self):
-        self.hole(10, self.h/2, r=2.0)
-        self.hole(30, self.h/2, r=2.0)
-        self.hole(50, self.h/2, d=5.9)
+        d_b = self.banana_socket_diameter
+        d_f = self.flipswitch_diameter
+
+        self.hole(10, self.h/2, d=d_b)
+        self.hole(30, self.h/2, d=d_b)
+        self.hole(50, self.h/2, d=d_f)
 
         self.rectangularHole(76, 6.4, 12.4, 12.4)
 
@@ -97,14 +106,13 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
         for x in [3.5, 38.5]:
             for y in [3.5, 65]:
                 self.hole(x, y, 1.0)
-        
+
     def render(self):
         # adjust to the variables you want in the local scope
         t = self.thickness
 
         l = self.l = 64
         hm = 15.5
-        #w = self.w = 72
 
         self.x, self.y, self.h = x, y, h = 85, 75, 35
 
@@ -118,13 +126,7 @@ To allow powering by laptop power supply: flip switch, Lenovo round socket (or a
             lambda: self.rectangularHole(x/2, y-20-5, 76, 40)], move="")
         self.rectangularWall(x, y, "ffff", move="left up only")
 
-        #self.rectangularWall(72, l, callback=[self.bottom], move="right")
         self.side(l, hm, move="right")
         self.side(l, hm, move="right mirror")
         self.side2(l, hm, move="right")
         self.side2(l, hm, move="right mirror")
-
-        #self.rectangularWall(42, l+12-t, "efff", callback=[self.regulatorCB], move="right")
-        #self.rectangularWall(16, l+12-t, "eFFe", move="right")
-        #self.rectangularWall(16, l+12-t, "eFFe", move="right")
-        #self.rectangularWall(16, 42, "fFfe", move="right")

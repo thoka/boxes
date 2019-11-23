@@ -17,6 +17,8 @@
 import re, datetime
 
 from xml.etree import cElementTree as ElementTree
+ElementTree.register_namespace("","http://www.w3.org/2000/svg")
+ElementTree.register_namespace("xlink", "http://www.w3.org/1999/xlink")
 
 class Extend:
 
@@ -29,21 +31,27 @@ class Extend:
     def __add__(self, v):
         x, y = v
         res = Extend()
-        res.minx = self.minx + x
-        res.maxx = self.maxx + x
-        res.miny = self.miny + y
-        res.maxy = self.maxy + y
+        if self.minx is not None:
+            res.minx = self.minx + x
+        if self.maxx is not None:
+            res.maxx = self.maxx + x
+        if self.miny is not None:
+            res.miny = self.miny + y
+        if self.maxy is not None:
+            res.maxy = self.maxy + y
         return res
 
     def addPoint(self, x, y):
-        if self.minx is None or self.minx > x:
-            self.minx = x
-        if self.maxx is None or self.maxx < x:
-            self.maxx = x
-        if self.miny is None or self.miny > y:
-            self.miny = y
-        if self.maxy is None or self.maxy < y:
-            self.maxy = y
+        if x is not None:
+            if self.minx is None or self.minx > x:
+                self.minx = x
+            if self.maxx is None or self.maxx < x:
+                self.maxx = x
+        if y is not None:
+            if self.miny is None or self.miny > y:
+                self.miny = y
+            if self.maxy is None or self.maxy < y:
+                self.maxy = y
 
     def addExtend(self, extend, x, y):
         extend = extend + (x, y)
@@ -161,27 +169,29 @@ class SVGFile(object):
 
         self.tree.write(self.filename)
 
+    d = r"(\-?\d+(\.\d+)?)"
+    optimize_patterns = [
+        (re.compile(" " + d + " " + d + r" (M|L) \1 \3 "),
+         r" \1 \3 "), # remove useless moves
+        # compress L parts of paths into V and H
+        (re.compile(" " + d + " " + d + r" L " + d + r" \3 "),
+         r" \1 \3 H \5 "),
+        (re.compile(" " + d + " " + d + r" L \1 " + d + " "),
+         r" \1 \3 V \5 "),
+        (re.compile(r"H " + d + r" L \1 " + d +  " "),
+         r"H \1 V \3 "),
+        (re.compile(r"V " + d + " L " + d + " \1 "),
+         r"V \1 H \3 "),
+     ]
+
     def optimize(self, element):
         number = 0
         if element.tag.endswith("}path"):
             path = element.attrib.get("d", "")
-            d = r"(\-?\d+(\.\d+)?)"
             while True:
                 old_number = number
-                for pattern, replacement in (
-                    (" " + d + " " + d + r" (M|L) \1 \3 ",
-                     r" \1 \3 "), # remove useless moves
-                    # compress L parts of paths into V and H
-                    (" " + d + " " + d + r" L " + d + r" \3 ",
-                     r" \1 \3 H \5 "),
-                    (" " + d + " " + d + r" L \1 " + d + " ",
-                     r" \1 \3 V \5 "),
-                    (r"H " + d + r" L \1 " + d +  " ",
-                     r"H \1 V \3 "),
-                    (r"V " + d + " L " + d + " \1 ",
-                     r"V \1 H \3 "),
-                ):
-                    path, n = re.subn(pattern, replacement, path, 2)
+                for pattern, replacement in self.optimize_patterns:
+                    path, n = pattern.subn(replacement, path)
                     number += n
                 if number == old_number:
                     break
@@ -242,10 +252,8 @@ def ticksPerMM(tree):
 
 def svgMerge(box, inkscape, output):
 
-    parser = ElementTree.XMLParser(remove_blank_text=True)
-
-    src_tree = ElementTree.parse(box, parser)
-    dest_tree = ElementTree.parse(inkscape, parser)
+    src_tree = ElementTree.parse(box)
+    dest_tree = ElementTree.parse(inkscape)
     dest_root = dest_tree.getroot()
 
     src_width, src_height = getSizeInMM(src_tree)
@@ -270,7 +278,7 @@ def svgMerge(box, inkscape, output):
                 scale_x, scale_y, off_x, off_y))
 
     # write the xml file
-    ElementTree.ElementTree(dest_root).write(output, pretty_print=True, encoding='utf-8', xml_declaration=True)
+    ElementTree.ElementTree(dest_root).write(output, encoding='utf-8', xml_declaration=True)
 
 if __name__ == "__main__":
     svg = SVGFile("examples/box.svg")

@@ -29,16 +29,21 @@ class StorageShelf(_TopEdge):
                                 roundedtriangle={"outset" : 1})
         self.buildArgParser("x", "sy", "sh", "outside", "bottom_edge",
                             "top_edge")
+        self.argparser.add_argument(
+            "--retainer",  action="store", type=float, default=0.0,
+            help="height of wall atthe front edges")
+        self.argparser.add_argument(
+            "--retainer_hole_edge",  action="store", type=boolarg, default=False,
+            help="use finger hole edge for retainer walls")
+        
         
 
     def ySlots(self):
         posy = -0.5 * self.thickness
+        h = sum(self.sh) + self.thickness * (len(self.sh) - 1)
         for y in self.sy[:-1]:
             posy += y + self.thickness
-            posh = 0
-            for h in self.sh:
-                self.fingerHolesAt(posy, posh, h)
-                posh += h + self.thickness
+            self.fingerHolesAt(posy, 0, h, 90)
 
     def hSlots(self):
         posh = -0.5 * self.thickness
@@ -64,7 +69,7 @@ class StorageShelf(_TopEdge):
     def render(self):
         if self.outside:
             self.sy = self.adjustSize(self.sy)
-            self.sh = self.adjustSize(self.sh)
+            self.sh = self.adjustSize(self.sh, self.top_edge, self.bottom_edge)
             self.x = self.adjustSize(self.x, e2=False)
 
         y = sum(self.sy) + self.thickness * (len(self.sy) - 1)
@@ -86,24 +91,31 @@ class StorageShelf(_TopEdge):
         self.ctx.save()
 
         # outer walls
-        self.rectangularWall(x, h, [b, "F", t1, "E"], callback=[None, self.hHoles, ], move="up")
-        self.rectangularWall(x, h, [b, "E", t3, "F"], callback=[None, self.hHoles, ], move="up")
+        # XXX retainer
+        self.rectangularWall(x, h, [b, "F", t1, "e"], callback=[None, self.hHoles, ], move="up")
+        self.rectangularWall(x, h, [b, "e", t3, "F"], callback=[None, self.hHoles, ], move="up")
 
         # floor
         if b != "e":
-            self.rectangularWall(x, y, "fffE", callback=[None, self.yHoles], move="up")
+            e = "fffe"
+            if self.retainer:
+                e = "ffff"
+            self.rectangularWall(x, y, e, callback=[None, self.yHoles], move="up")
 
         # inner walls
 
         be = "f" if b != "e" else "e"
 
         for i in range(len(self.sh) - 1):
-            e = ["f", edges.SlottedEdge(self, self.sy[::-1], "f", slots=0.5 * x), "f", "E"]
+            e = ["f", edges.SlottedEdge(self, self.sy[::-1], "f", slots=0.5 * x), "f", "e"]
+            if self.retainer:
+                e[3] = "f"
+
             self.rectangularWall(x, y, e, move="up")
 
         # top / lid
         if self.closedtop:
-            e = "FFFE" if self.top_edge == "f" else "fffE"
+            e = "FFFe" if self.top_edge == "f" else "fffe"
             self.rectangularWall(x, y, e, callback=[None, self.yHoles, ], move="up")
         else:
             self.drawLid(x, y, self.top_edge)
@@ -118,12 +130,18 @@ class StorageShelf(_TopEdge):
 
         # inner walls
         for i in range(len(self.sy) - 1):
-            e = [be, edges.SlottedEdge(self, self.sh, "E", slots=0.5 * x),
+            # XXX retainer
+            e = [be, edges.SlottedEdge(self, self.sh, "e", slots=0.5 * x),
                  "e", "f"]
             if self.closedtop:
-                e = [be, edges.SlottedEdge(self, self.sh, "E", slots=0.5 * x),"f", "f"]
+                e = [be, edges.SlottedEdge(self, self.sh, "e", slots=0.5 * x),"f", "f"]
             self.rectangularWall(x, h, e, move="up")
 
 
-
-
+        if self.retainer:
+            for i in range(len(self.sh)):
+                # XXX finger holes, F edges, left and right
+                e = "FEeE"
+                if self.retainer_hole_edge or (i == 0 and b == "h"):
+                    e = "hEeE"
+                self.rectangularWall(y, self.retainer, e, move="up")

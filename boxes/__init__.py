@@ -279,7 +279,7 @@ class Boxes:
             help="print reference rectangle with given length (zero to disable)")
         defaultgroup.add_argument(
             "--burn", action="store", type=float, default=0.1,
-            help="burn correction in mm (bigger values for tighter fit)")
+            help='burn correction in mm (bigger values for tighter fit). Use BurnTest in "Parts and Samples" to find the right value.')
 
     @contextmanager
     def saved_context(self):
@@ -524,6 +524,10 @@ class Boxes:
         self.addPart(parts.Parts(self))
 
     def adjustSize(self, l, e1=True, e2=True):
+        # Char to edge object
+        e1 = self.edges.get(e1, e1)
+        e2 = self.edges.get(e2, e2)
+
         try:
             total = sum(l)
             walls = (len(l) - 1) * self.thickness
@@ -537,7 +541,7 @@ class Boxes:
             walls += self.thickness
 
         if isinstance(e2, edges.BaseEdge):
-            walls += e2.startwidth + e2.margin()
+            walls += e2.startwidth() + e2.margin()
         elif e2:
             walls += self.thickness
 

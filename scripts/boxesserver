@@ -25,6 +25,9 @@ import codecs
 import mimetypes
 import re
 import markdown
+import gettext
+import glob
+import traceback
 
 # Python 2 vs Python 3 compat
 try:
@@ -32,6 +35,10 @@ try:
 except ImportError:
     from urllib import unquote_plus, quote
 
+try:
+    from urllib.parse import parse_qs
+except ImportError:
+    from cgi import parse_qs
 
 from wsgiref.util import setup_testing_defaults
 from wsgiref.simple_server import make_server
@@ -86,9 +93,12 @@ class ThrowingArgumentParser(argparse.ArgumentParser):
 boxes.ArgumentParser = ThrowingArgumentParser # Evil hack
 
 class BServer:
+
+    lang_re = re.compile(r"([a-z]{2,3}(-[-a-zA-Z0-9]*)?)\s*(;\s*q=(\d\.?\d*))?")
+
     def __init__(self):
-        self.boxes = {b.__name__ : b() for b in boxes.generators.getAllBoxGenerators().values() if b.webinterface}
-        self.boxes['TrayLayout2'] = boxes.generators.traylayout.TrayLayout2(self, webargs=True)
+        self.boxes = {b.__name__ : b for b in boxes.generators.getAllBoxGenerators().values() if b.webinterface}
+        self.boxes['TrayLayout2'] = boxes.generators.traylayout.TrayLayout2
         self.groups = boxes.generators.ui_groups
         self.groups_by_name = boxes.generators.ui_groups_by_name
 
@@ -97,8 +107,57 @@ class BServer:
                                     self.groups_by_name["Misc"]).add(box)
 
         self.staticdir = os.path.join(os.path.dirname(__file__), '../static/')
+        self._languages = None
 
-    def arg2html(self, a, prefix, defaults={}):
+    def getLanguages(self, domain=None, localedir=None):
+        if self._languages is not None:
+            return self._languages
+        self._languages = []
+        domain = "boxes.py"
+        for localedir in ["locale", gettext._default_localedir]:
+            files = glob.glob(os.path.join(localedir, '*', 'LC_MESSAGES', '%s.mo' % domain))
+            self._languages.extend([file.split(os.path.sep)[-3] for file in files])
+        self._languages.sort()
+        return self._languages
+
+    def getLanguage(self, args, accept_language):
+
+        lang = None
+        langs = []
+
+        for i, arg in enumerate(args):
+            if arg.startswith("language="):
+                lang = arg[len("language="):]
+                del args[i]
+                break
+        if lang:
+            try:
+                return gettext.translation('boxes.py', localedir='locale',
+                                           languages=[lang])
+            except OSError:
+                pass
+            try:
+                return gettext.translation('boxes.py', languages=[lang])
+            except OSError:
+                pass
+
+        # selected language not found try browser default
+        languages = accept_language.split(",")
+        for l in languages:
+            m = self.lang_re.match(l.strip())
+            if m:
+                langs.append((float(m.group(4) or 1.0), m.group(1)))
+
+        langs.sort(reverse=True)
+        langs = [l[1].replace("-", "_") for l in langs]
+
+        try:
+            return gettext.translation('boxes.py', localedir='locale',
+                                       languages=langs)
+        except OSError:
+            return gettext.translation('boxes.py', languages=langs, fallback=True)
+
+    def arg2html(self, a, prefix, defaults={}, _=lambda s:s):
         name = a.option_strings[0].replace("-", "")
         if isinstance(a, argparse._HelpAction):
             return ""
@@ -109,7 +168,7 @@ class BServer:
         default = defaults.get(name, None)
 
         row = """<tr><td>%s</td><td>%%s</td><td>%s</td></tr>\n""" % \
-              (viewname, a.help or "")
+              (_(viewname), "" if not a.help else _(a.help))
         if (isinstance(a, argparse._StoreAction) and
             hasattr(a.type, "html")):
             input = a.type.html(name, default or a.default)
@@ -121,7 +180,7 @@ class BServer:
             options = "\n".join(
                 ("""<option value="%s"%s>%s</option>""" %
                  (e, ' selected="selected"' if e == (default or a.default) else "",
-                  e) for e in a.choices))
+                  _(e)) for e in a.choices))
             input = """<select name="%s" size="1">\n%s</select>\n""" % (name, options)
         else:
             input =  """<input name="%s" type="text" value="%s">""" % \
@@ -150,11 +209,18 @@ class BServer:
     </script>
 """
 
-    def args2html(self, name, box, action="", defaults={}):
+    def args2html(self, name, box, lang, action="", defaults={}):
+        _ = lang.gettext
+        lang_name = lang.info().get('language', None)
+        if lang_name:
+            langparam = "?language=" + lang_name
+        else:
+            langparam = ""
+
         result = ["""<!DOCTYPE html>
 <html>
 <head>
-    <title>Boxes - """, name, """</title>
+    <title>""" + _("Boxes - %s") % _(name), """</title>
     <link rel="icon" type="image/svg+xml" href="static/boxes-logo.svg" sizes="any">
     <link rel="shortcut icon" type="image/x-icon" href="static/favicon.ico">
     <link rel="stylesheet" href="static/self.css" type="text/css" />
@@ -166,7 +232,7 @@ class BServer:
 
 <div class="container" style="background-color: #FFF8EA;">
 <div style="float: left;">
-<a href="./"><h1>Boxes.py</h1></a>
+<a href="./""" + langparam + '"><h1>' + _("Boxes.py") + """</h1></a>
 </div>
 <div style="width: 120px; float: right;">
 <img alt="self-Logo" src="static/boxes-logo.svg" width="120" >
@@ -174,8 +240,8 @@ class BServer:
 <div>
 <div class="clear"></div>
 <hr />
-<h2 style="margin: 0px 0px 0px 20px;" >""", name, """</h2>
-        <p>""", box.__doc__ or "", """</p>
+<h2 style="margin: 0px 0px 0px 20px;" >""", _(name), """</h2>
+        <p>""", _(box.__doc__) if box.__doc__ else "", """</p>
 <form action="%s" method="GET" target="_blank">
         """ % (action)]
         groupid = 0
@@ -185,15 +251,15 @@ class BServer:
             if len(group._group_actions) == 1 and isinstance(group._group_actions[0], argparse._HelpAction):
                 continue
             prefix = getattr(group, "prefix", None)
-            result.append('''<h3 id="h-%s" class="open" onclick="showHide(%s)">%s</h3>\n<table id="%s">\n''' % (groupid, groupid, group.title, groupid))
+            result.append('''<h3 id="h-%s" class="open" onclick="showHide(%s)">%s</h3>\n<table id="%s">\n''' % (groupid, groupid, _(group.title), groupid))
             for a in group._group_actions:
                 if a.dest in ("input", "output"):
                     continue
-                result.append(self.arg2html(a, prefix, defaults))
+                result.append(self.arg2html(a, prefix, defaults, _))
             result.append("</table>")
             groupid += 1
         result.append("""
-<p><button name="render" value="1">Generate</button></p>
+<p><button name="render" value="1">""" + _("Generate") + """</button></p>
 </form>
 
 </div>
@@ -208,29 +274,26 @@ class BServer:
 <hr />
 """)
         if box.description:
-            result.append(markdown.markdown(box.description))
+            result.append(markdown.markdown(_(box.description)))
         result.append("""
 </div>
-
-<div class="footer container">
-<ul>
- <li><a href="https://github.com/florianfesti/boxes">Get Source at GitHub</a></li>
- <li><a href="https://florianfesti.github.io/boxes/html/index.html">Documentation and API Description</a></li>
- <li><a href="https://hackaday.io/project/10649-boxespy">Hackaday.io Project Page</a></li>
-</ul>
-</div>
-
-</body>
+""" + self.footer(lang) + """</body>
 </html>
         """ )
         return (s.encode("utf-8") for s in result)
 
-    def menu(self):
+    def menu(self, lang):
+        _ = lang.gettext
+        lang_name = lang.info().get('language', None)
+        if lang_name:
+            langparam = "?language=" + lang_name
+        else:
+            langparam = ""
 
         result = ["""<!DOCTYPE html>
 <html>
 <head>
-    <title>Boxes.py</title>
+    <title>""" + _("Boxes.py") + """</title>
     <link rel="icon" type="image/svg+xml" href="static/boxes-logo.svg" sizes="any">
     <link rel="shortcut icon" type="image/x-icon" href="static/favicon.ico">
     <link rel="stylesheet" href="static/self.css" type="text/css" />
@@ -250,13 +313,13 @@ class BServer:
 <body onload="hideargs()">
 <div class="container" style="background-color: #FFF8EA;">
 <div style="width: 75%; float: left;">
-<h1>Boxes.py</h1>
+<h1>""" + _("Boxes.py") + """</h1>
 <p>
-Create boxes and more with a laser cutter!
+""" + _("Create boxes and more with a laser cutter!") + """
 </p>
 <p>
-
-        <a href="https://hackaday.io/project/10649-boxespy">Boxes.py</a> is an <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">Open Source</a> box generator written in <a href="https://www.python.org/">Python</a>. It features both finished parametrized generators as well as a Python API for writing your own. It features finger and (flat) dovetail joints, flex cuts, holes and slots for screws, hinges, gears, pulleys and much more.
+""" + _("""
+        <a href="https://hackaday.io/project/10649-boxespy">Boxes.py</a> is an <a href="https://www.gnu.org/licenses/gpl-3.0.en.html">Open Source</a> box generator written in <a href="https://www.python.org/">Python</a>. It features both finished parametrized generators as well as a Python API for writing your own. It features finger and (flat) dovetail joints, flex cuts, holes and slots for screws, hinges, gears, pulleys and much more.""") + """
 </p>
 
 
@@ -270,20 +333,19 @@ Create boxes and more with a laser cutter!
 <div style="width: 100%">
 """ ]
         for nr, group in enumerate(self.groups):
-            result.append('''<h3 id="h-%s" class="open" onclick="showHide('%s')">%s</h3>\n<div id="%s">\n''' % (nr, nr, group.title, nr))
+            result.append('''<h3 id="h-%s" class="open" onclick="showHide('%s')">%s</h3>\n<div id="%s">\n''' % (nr, nr, _(group.title), nr))
             result.append("""
-            <div style="width: 20%%; float: right;">
-            <img style="width: 100%%;" id="sample-%s" src="static/nothing.png" alt="" />
-            </div>\n<ul>\n""" % (group.name))
+            <img style="width: 200px;" id="sample-%s" src="static/nothing.png" alt="" />
+            <ul>\n""" % (group.name))
             for box in group.generators:
-                name = box.__class__.__name__
+                name = box.__name__
                 if name in ("TrayLayout2", ):
                     continue
                 docs = ""
                 if box.__doc__:
-                    docs = " - " + box.__doc__
-                result.append("""  <li onmouseenter="change('%s', 'static/samples/%s.jpg')" onmouseleave="changeback('%s')"><a href="%s">%s</a>%s</li>\n""" % (
-                    group.name, name, group.name, name, name, docs))
+                    docs = " - " + _(box.__doc__)
+                result.append("""  <li onmouseenter="change('%s', 'static/samples/%s-thumb.jpg')" onmouseleave="changeback('%s')"><a href="%s%s">%s</a>%s</li>\n""" % (
+                    group.name, name, group.name, name, langparam,  _(name), docs))
             result.append("</ul>\n</div>\n")
         result.append("""
 </div>
@@ -292,37 +354,47 @@ Create boxes and more with a laser cutter!
 <div class="clear"></div>
 <hr />
 </div>
-</div>
-
-<div class="footer container">
-<ul>
- <li><a href="https://github.com/florianfesti/boxes">Get Source at GitHub</a></li>
- <li><a href="https://florianfesti.github.io/boxes/html/index.html">Documentation and API Description</a></li>
- <li><a href="https://hackaday.io/project/10649-boxespy">Hackaday.io Project Page</a></li>
-</ul>
-</div>
-
+</div>""" + self.footer(lang) + """
 </body>
 </html>
 """)
         return (s.encode("utf-8") for s in result)
 
 
-    def errorMessage(self, name, e):
+    def footer(self, lang):
+        _ = lang.gettext
+        language = lang.info().get('language', '')
+        return """
+<div class="footer container">
+<ul>
+  <li><form><select name="language" onchange='if(this.value != "%s") { this.form.submit(); }'>""" % language + \
+      ("<option value='' selected></option>" if not language else "") + \
+    "\n".join(
+      ("<option value='%s' %s>%s</option>" % (l, "selected" if l==language else "", l)
+       for l in self.getLanguages())) + """
+  </select></form></li>
+  <li><a href="https://github.com/florianfesti/boxes">""" + _("Get Source at GitHub") + """</a></li>
+  <li><a href="https://florianfesti.github.io/boxes/html/index.html">""" + _("Documentation and API Description") + """</a></li>
+  <li><a href="https://hackaday.io/project/10649-boxespy">""" + _("Hackaday.io Project Page") + """</a></li>
+</ul>
+</div>
+"""
+
+    def errorMessage(self, name, e, _):
         return [
-            b"""<html>
+            ("""<html>
 <head>
-  <title>Error generating""", name.encode(),
-            b"""</title>
+  <title>""" +  _("Error generating %s") % _(name) +
+            """</title>
   <meta name="flattr:id" content="456799">
 </head>
 <body>
-<h1>An error occurred!</h1>""",
-u"".join(u"<p>%s</p>" % cgi.escape(s) for s in type(u"")(e).split(u"\n")).encode('utf-8'),
-b"""
+<h1>""" + _("An error occurred!") + "</h1>" +
+"".join(u"<p>%s</p>" % cgi.escape(s) for s in type(u"")(e).split(u"\n")) +
+"""
 </body>
 </html>
-""" ]
+""").encode("utf-8") ]
 
     def serveStatic(self, environ, start_response):
         filename = environ["PATH_INFO"][len("/static/"):]
@@ -370,16 +442,23 @@ b"""
         status = '200 OK'
         headers = [('Content-type', 'text/html; charset=utf-8'), ('X-XSS-Protection', '1; mode=block'), ('X-Content-Type-Options', 'nosniff'), ('x-frame-options', 'SAMEORIGIN'), ('Referrer-Policy', 'no-referrer')]
 
-        d = cgi.parse_qs(environ['QUERY_STRING'])
+        d = parse_qs(environ['QUERY_STRING'])
         name = environ["PATH_INFO"][1:]
-
-        box = self.boxes.get(name, None)
-        if not box:
-            start_response(status, headers)
-            return self.menu()
-
         args = [unquote_plus(arg) for arg in
                 environ['QUERY_STRING'].split("&")]
+
+        lang = self.getLanguage(args, environ.get("HTTP_ACCEPT_LANGUAGE", ""))
+        _ = lang.gettext
+
+        box_cls = self.boxes.get(name, None)
+        if not box_cls:
+            start_response(status, headers)
+            return self.menu(lang)
+
+        if name == "TrayLayout2":
+            box = box_cls(self, webargs=True)
+        else:
+            box = box_cls()
 
         if "render=1" not in args:
             defaults = { }
@@ -389,20 +468,21 @@ b"""
                     k, v = kv
                     defaults[k] = cgi.escape(v, True)
             start_response(status, headers)
-            return self.args2html(name, box, "./" + name, defaults=defaults)
+            return self.args2html(name, box, lang, "./" + name, defaults=defaults)
         else:
             args = ["--"+ arg for arg in args if arg != "render=1"]
             try:
                 box.parseArgs(args)
             except (ArgumentParserError) as e:
                 start_response(status, headers)
-                return self.errorMessage(name, e)
+                return self.errorMessage(name, e, _)
             if name == "TrayLayout":
                 start_response(status, headers)
                 box.fillDefault(box.x, box.y)
-                self.boxes["TrayLayout2"].argparser.set_defaults(layout=str(box))
+                layout2 = boxes.generators.traylayout.TrayLayout2(self, webargs=True)
+                layout2.argparser.set_defaults(layout=str(box))
                 return self.args2html(
-                    name, self.boxes["TrayLayout2"], action="TrayLayout2")
+                    name, layout2, lang, action="TrayLayout2")
             if name == "TrayLayout2":
                 try:
                     box.parse(box.layout.split("\n"))
@@ -411,26 +491,43 @@ b"""
                     start_response(status, headers)
                     return self.errorMessage(name, e)
 
-            start_response(status,
-                           box.formats.http_headers.get(
-                               box.format,
-                               [('Content-type', 'application/unknown; charset=utf-8')]))
-            fd, box.output = tempfile.mkstemp()
-            box.metadata["url"] = self.getURL(environ)
-            box.open()
-            box.render()
-            box.close()
+            try:
+                fd, box.output = tempfile.mkstemp()
+                box.metadata["url"] = self.getURL(environ)
+                box.open()
+                box.render()
+                box.close()
+            except Exception as e:
+                traceback.print_exc()
+                start_response("500 Internal Server Error",
+                               [('Content-type', 'text/plain; charset=utf-8')])
+                return([b"Server Error\n\n", str(e).encode("utf-8")])
+
+            http_headers = box.formats.http_headers.get(
+                box.format,
+                [('Content-type', 'application/unknown; charset=utf-8')])[:]
+
+            if box.format != "svg":
+                extension = box.format
+                if extension == "svg_Ponoko":
+                    extension = "svg"
+                http_headers.append(('Content-Disposition', 'attachment; filename="%s.%s"' % (box.__class__.__name__, extension)))
+            start_response(status, http_headers)
             result = open(box.output).readlines()
             os.close(fd)
             os.remove(box.output)
             return (l.encode("utf-8") for l in result)
 
 if __name__=="__main__":
+    if len(sys.argv) > 1:
+        port = int(sys.argv[1])
+    else:
+        port = 8000
     fc = FileChecker()
     fc.start()
     boxserver = BServer()
-    httpd = make_server('', 8000, boxserver.serve)
-    print("Serving on port 8000...")
+    httpd = make_server('', port, boxserver.serve)
+    print("BoxesServer serving on port %s..." %port)
     httpd.serve_forever()
 else:
     application = BServer().serve

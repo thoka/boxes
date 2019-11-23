@@ -528,7 +528,7 @@ class FingerJointSettings(Settings):
 Values:
 
 * absolute
-
+  * style : "rectangular" : style of the fingers
   * surroundingspaces : 2 : maximum space at the start and end in multiple of normal spaces
   * angle: 90 : Angle of the walls meeting
 
@@ -538,11 +538,12 @@ Values:
   * finger : 2.0 : width of the fingers
   * width : 1.0 : width of finger holes
   * edge_width : 1.0 : space below holes of FingerHoleEdge
-  * play : 0.0 : extra space to allow movement
+  * play : 0.0 : extra space to allow finger move in and out
 
 """
 
     absolute_params = {
+        "style" : ("rectangular", "springs"),
         "surroundingspaces": 2.0,
         "angle" : 90.0,
     }
@@ -634,7 +635,15 @@ class FingerJointEdge(BaseEdge, FingerJointBase):
                 else:
                     self.edge(s)
 
-            self.polyline(0, -90 * p, h, 90 * p, f, 90 * p, h, -90 * p)
+            if positive and self.settings.style == "springs":
+                self.polyline(
+                    0, -90 * p, 0.8*h, (90 * p, 0.2*h),
+                    0.1 * h, 90, 0.9*h, -180, 0.9*h, 90,
+                    f - 0.6*h,
+                    90, 0.9*h, -180, 0.9*h, 90, 0.1*h,
+                (90 * p, 0.2 *h), 0.8*h, -90 * p)
+            else:
+                self.polyline(0, -90 * p, h, 90 * p, f, 90 * p, h, -90 * p)
 
         self.edge(leftover / 2.0, tabs=1)
 
@@ -716,7 +725,7 @@ class FingerHoleEdge(BaseEdge):
         dist = self.fingerHoles.settings.edge_width
         with self.saved_context():
             self.fingerHoles(
-                0, dist + self.settings.thickness / 2, length, 0,
+                0, self.burn + dist + self.settings.thickness / 2, length, 0,
                 bedBolts=bedBolts, bedBoltSettings=bedBoltSettings)
         self.edge(length, tabs=2)
 
@@ -817,7 +826,7 @@ class StackableEdge(BaseEdge):
         return self._height() if self.bottom else 0
 
     def margin(self):
-        return 0 if self.bottom else self._height()
+        return 0 if self.bottom else self.settings.height
 
 
 class StackableEdgeTop(StackableEdge):
@@ -1430,6 +1439,8 @@ class LidSettings(FingerJointSettings):
 
     """Settings for Slide-on Lids
 
+Note that edge_width below also determines how much the sides extend above the lid.
+
 Inherited:
 
     """
@@ -1461,11 +1472,11 @@ Inherited:
 
 class LidEdge(FingerJointEdge):
     char = "l"
-    description = "Edge for slide on lid"
+    description = "Edge for slide on lid (back)"
 
 class LidHoleEdge(FingerHoleEdge):
     char = "L"
-    description = "Edge for slide on lid"
+    description = "Edge for slide on lid (box back)"
 
 class LidRight(BaseEdge):
     char = "n"
@@ -1532,6 +1543,8 @@ class LidSideRight(BaseEdge):
         t = self.boxes.thickness
         s = self.settings.play
         pin = self.settings.second_pin
+        edge_width = self.settings.edge_width
+        r = edge_width/3
 
         if self.rightside:
             spring = self.settings.spring in ("right", "both")
@@ -1539,34 +1552,34 @@ class LidSideRight(BaseEdge):
             spring = self.settings.spring in ("left", "both")
 
         if spring:
-            p = [s, -90, t+s, -90, t+s, 90, t-s, 90, length+t]
+            p = [s, -90, t+s, -90, t+s, 90, edge_width-s/2, 90, length+t]
         else:
-            p = [t+s, -90, t+s, -90, 2*t+s, 90, t-s, 90, length+t]
+            p = [t+s, -90, t+s, -90, 2*t+s, 90, edge_width-s/2, 90, length+t]
 
         if pin:
             pinl = 2*t
-            p[-1:] = [p[-1]-t-2*pinl, 90, 2*t+s, -90, 2*pinl+s, -90, t+s, -90,
-                      pinl, 90, t, 90, pinl+t-s]
+            p[-1:] = [p[-1]-1.5*t-2*pinl-r, (90, r), edge_width+t+s/2-r, -90, 2*pinl+s+0.5*t, -90, t+s, -90,
+                      pinl-r, (90, r), edge_width-s/2-2*r, (90, r), pinl+t-s-r]
 
         holex = 0.6 * t
-        holey = -0.5*t
+        holey = -0.5*t + self.burn - s / 2
         if self.rightside:
             p = list(reversed(p))
             holex = length - holex
-            holey = 1.5*t
+            holey = edge_width + 0.5*t + self.burn
 
         if spring:
             self.rectangularHole(holex, holey, 0.4*t, t+2*s)
         self.polyline(*p)
 
     def startwidth(self):
-        return 2*self.boxes.thickness if self.rightside else 0.0
+        return self.boxes.thickness + self.settings.edge_width if self.rightside else -self.settings.play / 2
 
     def endwidth(self):
-        return 2*self.boxes.thickness if not self.rightside else 0.0
+        return self.boxes.thickness + self.settings.edge_width if not self.rightside else -self.settings.play / 2
 
     def margin(self):
-        return 2*self.boxes.thickness if not self.rightside else 0.0
+        return self.boxes.thickness + self.settings.edge_width + self.settings.play / 2 if not self.rightside else 0.0
 
 class LidSideLeft(LidSideRight):
     char = "M"
