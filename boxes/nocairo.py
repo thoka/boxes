@@ -6,6 +6,7 @@ from affine import Affine
 from svgwrite import mm 
 
 EPS = 1e-2
+PADDING = 10
 
 def points_equal(x1,y1,x2,y2):
    return abs(x1-x2)<EPS and abs(y1-y2)<EPS
@@ -29,6 +30,8 @@ class SVGSurface:
         
         self.dwg['width'] = self._ctx._xmax-self._ctx._xmin+2*self._ctx._padding
         self.dwg['height'] = self._ctx._ymax-self._ctx._ymin+2*self._ctx._padding
+
+        self._ctx._parts.translate( PADDING - self._ctx._xmin, PADDING - self._ctx._ymin )
 
         self.dwg.save()
 
