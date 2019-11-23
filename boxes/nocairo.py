@@ -1,6 +1,10 @@
 import math
 import svgwrite
-import cairo as cairo_o
+
+try:
+    import cairo 
+except ImportError:
+    cairo = None
 
 from affine import Affine 
 from svgwrite import mm 
@@ -20,8 +24,9 @@ class SVGSurface:
     def __init__(self,filename,*al,**ad):
         self._filename = filename
         self.dwg = svgwrite.Drawing(filename="new-"+filename)
-    
-        self.csurf = cairo_o.SVGSurface(filename, 10000, 10000)
+
+        if cairo:    
+            self.csurf = cairo.SVGSurface(filename, 10000, 10000)
 
     def flush(self):
         pass
@@ -35,7 +40,8 @@ class SVGSurface:
 
         self.dwg.save()
 
-        self.csurf.finish()
+        if cairo:
+            self.csurf.finish()
 
 def report(func):
 
@@ -51,17 +57,16 @@ def report(func):
     return wrapper
 
 r = report
+
 class Context:
     def __init__(self,surface,*al,**ad):
         self._dwg = surface.dwg
         self._parts = self._dwg.add( self._dwg.g(id='parts') )
         surface._ctx = self
    
-        self._cctx = cairo_o.Context(surface.csurf)
-
         self._xmin = self._ymin = 100000
         self._xmax = self._ymax = -100000
-        self._padding = 10
+        self._padding = PADDING
 
         self._actions = []
         self._wrappers = {}      
@@ -72,6 +77,9 @@ class Context:
         self._lw = 0
         self._rgb = (0,0,0)
         self._ff = 'sans-serif'
+
+        if cairo:
+            self._cctx = cairo.Context(surface.csurf)
 
     def _create_new_wrapper_function(self,key):
         def wrapper(*al,**ad):
@@ -98,84 +106,84 @@ class Context:
     @r
     def save(self):
         self._stack.append( (self._m, self._xy, self._lw, self._rgb) )
-        self._cctx.save()
+        if cairo: self._cctx.save()
 
     @r
     def restore(self):
         self._m,self._xy, self._lw, self._rgb  = self._stack.pop()
         self._xy = (0,0)
-        self._cctx.restore()
+        if cairo: self._cctx.restore()
 
     @r
     def translate(self,x,y):
         self._m *= Affine.translation(x,y)
         self._xy = (0,0)
-        self._cctx.translate(x,y)
+        if cairo: self._cctx.translate(x,y)
 
     @r
     def scale(self,sx,sy):
         self._m *= Affine.scale(sx,sy)
-        self._cctx.scale(sx,sy)
+        if cairo: self._cctx.scale(sx,sy)
 
     @r
     def rotate(self,r):
         self._m *= Affine.rotation(180*r/math.pi)
-        self._cctx.rotate(r)
+        if cairo: self._cctx.rotate(r)
 
     @r
     def set_line_width(self,lw):
         self._lw = lw
-        self._cctx.set_line_width(lw)
+        if cairo: self._cctx.set_line_width(lw)
 
     @r
     def set_source_rgb(self,r,g,b):
         self._rbg = (r,g,b)
-        self._cctx.set_source_rgb(r,g,b)
+        if cairo: self._cctx.set_source_rgb(r,g,b)
 
     @r
     def move_to(self,x,y):
         self._xy = (x,y)
         self._update_bounds(x,y)
-        self._cctx.move_to(x,y)
+        if cairo: self._cctx.move_to(x,y)
 
-    @r
-    def line_to(self,x,y):
-
+    def _line_to(self,x,y):
         self._update_bounds(x,y)
         x1,y1 = self._xy
-        x2,y2 = x,y
+        self._xy = x,y
 
-        self._xy = (x2,y2)
-        self._cctx.line_to(x,y)
-
-        if points_equal(x2,y2,x1,y1):
+        if points_equal(x,y,x1,y1):
             return
 
         self._parts.add(
-            self._dwg.line(start=self._m*(x1,y1),end=self._m*(x2,y2),stroke="black",stroke_width=self._lw)            
+            self._dwg.line(start=self._m*(x1,y1),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
         )
+
+    @r
+    def line_to(self,x,y):
+        self._line_to(x,y)
+        if cairo: self._cctx.line_to(x,y)
+
 
     @r
     def rectangle(self,x,y,width,height):
         self._update_bounds(x,y)
         self._update_bounds(x+width,y+height)
-        self._cctx.rectangle(x,y,width,height)
-        pass
+        if cairo: self._cctx.rectangle(x,y,width,height)
+        
 
     @r
     def select_font_face(self,ff):
         self._ff = ff 
-        self._cctx.select_font_face(ff)
+        if cairo: self._cctx.select_font_face(ff)
 
     @r
     def set_font_size(self,fs):
         self._fs = fs
-        self._cctx.set_font_size(fs)
+        if cairo: self._cctx.set_font_size(fs)
 
     @r
     def show_text(self,text):
-        self._cctx.show_text(text)
-        pass
+        if cairo: self._cctx.show_text(text)
 
     @r
     def arc(self,xc,yc,radius,angle1,angle2):
@@ -184,7 +192,7 @@ class Context:
 
         # self.line_to(x1,y1)
         self._xy = (x2,y2)
-        self._cctx.arc(xc,yc,radius,angle1,angle2)
+        if cairo: self._cctx.arc(xc,yc,radius,angle1,angle2)
 
     @r
     def arc_negative(self,xc,yc,radius,angle1,angle2):
@@ -193,40 +201,43 @@ class Context:
 
         # self.line_to(x1,y1)
         self._xy = (x2,y2)
-        self._cctx.arc_negative(xc,yc,radius,angle1,angle2)
+        if cairo: self._cctx.arc_negative(xc,yc,radius,angle1,angle2)
 
     @r
     def curve_to(self,x1, y1, x2, y2, x3, y3):
         self._xy = (x3,y3)
         self._update_bounds(x3,y3)
-        self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
+        if cairo: self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
 
     @r
     def stroke(self):
         self._xy = (0,0)
-        self._cctx.stroke()
+        if cairo: self._cctx.stroke()
 
     @r
     def fill(self):
         self._xy = (0,0)
-        self._cctx.fill()
+        if cairo: self._cctx.fill()
 
     @r
     def text_extents(self,text):
-        extents = self._cctx.text_extents(text)
-        return extents
+        if cairo:
+            extents = self._cctx.text_extents(text)
+            return extents
         return (10,10,10*len(text),10,10,10*len(text))
 
     @r
     def get_current_point(self):
-        cxy = self._cctx.get_current_point()
-        if not points_equal(*self._xy,*cxy):
-            print(self._xy,cxy)
-            raise RuntimeError()
-        #return cxy
+        
+        if cairo:
+            cxy = self._cctx.get_current_point()
+            if not points_equal(*self._xy,*cxy):
+                print(self._xy,cxy)
+                raise RuntimeError()
+
         return self._xy
 
     @r
     def flush(self):
-        self._cctx.flush()
-        pass
+        if cairo: self._cctx.flush()
+        
