@@ -18,8 +18,8 @@
 import subprocess
 import tempfile
 import os
-import cairo
 import re
+from boxes import nocairo as cairo #import cairo
 from boxes import svgutil
 
 class PSFile:

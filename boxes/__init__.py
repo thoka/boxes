@@ -14,13 +14,15 @@
 #   You should have received a copy of the GNU General Public License
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
-try:
-    import cairocffi
+#tk: hm, cairo seems not to be needed in this module
+# try:
+#     import cairocffi
 
-    cairocffi.install_as_pycairo()
-except ImportError:
-    pass
-import cairo
+#     cairocffi.install_as_pycairo()
+# except ImportError:
+#     pass
+#     import cairo
+
 import math
 import sys
 import argparse
