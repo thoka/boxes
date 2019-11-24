@@ -6,6 +6,8 @@ try:
 except ImportError:
     cairo = None
 
+#cairo = None
+
 from affine import Affine 
 from svgwrite import mm 
 
@@ -23,7 +25,7 @@ def pdiff(p1,p2):
 class SVGSurface:
     def __init__(self,filename,*al,**ad):
         self._filename = filename
-        self.dwg = svgwrite.Drawing(filename="new-"+filename)
+        self.dwg = svgwrite.Drawing(filename="nc-"+filename)
 
         if cairo:    
             self.csurf = cairo.SVGSurface(filename, 10000, 10000)
@@ -107,11 +109,6 @@ class Context:
         self._ymin = min(self._ymin,my)
         self._ymax = max(self._ymax,my)
 
-
-    def _update_bounds(self,*xy): #deprecated
-        x,y = self._m*xy
-        self._update_bounds_(x,y)
-        
     @r
     def save(self):
         self._stack.append( (self._m, self._xy, self._lw, self._rgb, self._xy) )
@@ -122,6 +119,8 @@ class Context:
     def restore(self):
         self._m,self._xy, self._lw, self._rgb, self._xy = self._stack.pop()
         if cairo: self._cctx.restore()
+
+    ## transformations
 
     @r
     def translate(self,x,y):
@@ -139,6 +138,8 @@ class Context:
         self._m *= Affine.rotation(180*r/math.pi)
         if cairo: self._cctx.rotate(r)
 
+    ##
+
     @r
     def set_line_width(self,lw):
         self._lw = lw
@@ -146,33 +147,39 @@ class Context:
 
     @r
     def set_source_rgb(self,r,g,b):
-        self._rbg = (r,g,b)
+        self._rgb = (r,g,b)
         if cairo: self._cctx.set_source_rgb(r,g,b)
+
+    def _svg_color(self):
+        r,g,b = self._rgb
+        return f'rgb({r*255:.0f},{g*255:.0f},{b*255:.0f})'
 
     ## path methods
 
     def _line_to(self,x,y):
 
         x1,y1 = self._m*self._xy
-        self._update_bounds_(x1,y1)
-        self._xy = x,y
         x2,y2 = self._m*self._xy
+        self._update_bounds_(x1,y1)
         self._update_bounds_(x2,y2)
 
-        #if points_equal(x2,y2,x1,y1): return
+        self._xy = x,y
 
-        self._path.append(
-            f'L {x2:.2f},{y2:.2f}'
-        )  
-        
-        #self._parts.add(
-        #    self._dwg.line(start=self._m*(x1,y1),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
-        #)
+        dx,dy = x2-x1,y2-y1
+        if abs(dx)<EPS:
+            if abs(dy)>EPS:
+                self._path.append(f'V {y2:.2f}')  
+        elif abs(dy)<EPS:
+            self._path.append(f'H {x2:.2f}')
+        else:
+            self._path.append(f'L {x2:.2f},{y2:.2f}')  
 
     @r
     def move_to(self,x,y):
         self._xy = (x,y)
         x1,y1 = self._m*self._xy
+        if self._path and self._path[-1].startswith('M'):
+            self._path.pop()
         self._path.append( f'M {x1:.2f},{y1:.2f}' )
         if cairo: self._cctx.move_to(x,y)
 
@@ -221,14 +228,15 @@ class Context:
 
     @r
     def stroke(self):
-        if self._path:
+        if len(self._path)>1:
             self._parts.add(
-                self._dwg.path(d=' '.join(self._path),stroke="black",stroke_width=self._lw)            
+                self._dwg.path(d=' '.join(self._path),stroke=self._svg_color(),stroke_width=self._lw)            
             )
-            self._path = []
         else:
             pass # print('stroke without path')
         self._xy = (0,0)
+        self._path = []
+
         if cairo: self._cctx.stroke()
 
     @r
@@ -252,28 +260,29 @@ class Context:
         if cairo: self._cctx.show_text(text)
 
     @r
-    def rectangle(self,x,y,width,height):
-        self._update_bounds(x,y)
-        self._update_bounds(x+width,y+height)
-        
-        x1,y1 = self._m*(x,y)
-        x2,y2 = self._m*(x+width,y+height)
-
-        self._parts.add(
-            self._dwg.rect( 
-                (f'{min(x1,x2):.2f}',f'{min(y1,y2):.2f}'), #insert
-                (f'{abs(x2-x1):.2f}',f'{abs(y2-y1):.2f}'), #size
-                stroke="black",stroke_width=self._lw
-            )            
-        )
-        if cairo: self._cctx.rectangle(x,y,width,height)
-
-    @r
     def text_extents(self,text):
         if cairo:
             extents = self._cctx.text_extents(text)
             return extents
         return (10,10,10*len(text),10,10,10*len(text))
+
+
+    @r
+    def rectangle(self,x,y,width,height):
+        
+        x1,y1 = self._m*(x,y)
+        x2,y2 = self._m*(x+width,y+height)
+        self._update_bounds_(x1,y1)
+        self._update_bounds_(x2,y2)
+
+        self._parts.add(
+            self._dwg.rect( 
+                (f'{min(x1,x2):.2f}',f'{min(y1,y2):.2f}'), #insert
+                (f'{abs(x2-x1):.2f}',f'{abs(y2-y1):.2f}'), #size
+                stroke=self._svg_color(),stroke_width=self._lw
+            )            
+        )
+        if cairo: self._cctx.rectangle(x,y,width,height)
 
     @r
     def get_current_point(self):
