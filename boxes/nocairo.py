@@ -254,16 +254,18 @@ class Context:
     def rectangle(self,x,y,width,height):
         self._update_bounds(x,y)
         self._update_bounds(x+width,y+height)
+        
         x1,y1 = self._m*(x,y)
         x2,y2 = self._m*(x+width,y+height)
 
         self._parts.add(
-            self._dwg.rect(xrt=self._m*(x,y),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
+            self._dwg.rect( 
+                (f'{min(x1,x2):.2f}',f'{min(y1,y2):.2f}'), #insert
+                (f'{abs(x2-x1):.2f}',f'{abs(y2-y1):.2f}'), #size
+                stroke="black",stroke_width=self._lw
+            )            
         )
-
         if cairo: self._cctx.rectangle(x,y,width,height)
-
-
 
     @r
     def text_extents(self,text):
