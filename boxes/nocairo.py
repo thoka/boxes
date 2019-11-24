@@ -38,7 +38,7 @@ class SVGSurface:
 
         self._ctx._parts.translate( PADDING - self._ctx._xmin, PADDING - self._ctx._ymin )
 
-        self.dwg.save()
+        self.dwg.save(pretty=True)
 
         if cairo:
             self.csurf.finish()
@@ -49,7 +49,12 @@ def report(func):
 
     def wrapper(self,*l,**d):
         xy = self._xy
-        cxy = self._cctx.get_current_point()
+
+        if cairo:
+            cxy = self._cctx.get_current_point()
+        else:
+            cxy = ''
+
         res = func(self,*l,**d)
         print(func.__name__,l,res,xy,cxy)
         return res
@@ -61,7 +66,7 @@ r = report
 class Context:
     def __init__(self,surface,*al,**ad):
         self._dwg = surface.dwg
-        self._parts = self._dwg.add( self._dwg.g(id='parts') )
+        self._parts = self._dwg.add( self._dwg.g(id='parts',style='fill:yellow') )
         surface._ctx = self
    
         self._xmin = self._ymin = 100000
@@ -105,13 +110,14 @@ class Context:
 
     @r
     def save(self):
-        self._stack.append( (self._m, self._xy, self._lw, self._rgb) )
+        self._stack.append( (self._m, self._xy, self._lw, self._rgb, self._path, self._xy) )
+        self._xy = (0,0)
+        self._path = None
         if cairo: self._cctx.save()
 
     @r
     def restore(self):
-        self._m,self._xy, self._lw, self._rgb  = self._stack.pop()
-        self._xy = (0,0)
+        self._m,self._xy, self._lw, self._rgb, self._path, self._xy = self._stack.pop()
         if cairo: self._cctx.restore()
 
     @r
@@ -140,36 +146,95 @@ class Context:
         self._rbg = (r,g,b)
         if cairo: self._cctx.set_source_rgb(r,g,b)
 
+    ## path methods
+
+    def _ensure_path(self):
+        if not self._path:
+            x,y = self._m*self._xy
+            self._path = [ f'M {x:.2f},{y:.2f}' ]
+
+    def _line_to(self,x,y):
+        self._update_bounds(x,y)
+        self._ensure_path()
+
+        x1,y1 = self._m*self._xy
+
+        self._xy = x,y
+        x2,y2 = self._m*self._xy
+
+        #if points_equal(x2,y2,x1,y1): return
+
+        self._path.append(
+            f'L {x2:.2f},{y2:.2f}'
+        )  
+        
+        #self._parts.add(
+        #    self._dwg.line(start=self._m*(x1,y1),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
+        #)
+
     @r
     def move_to(self,x,y):
         self._xy = (x,y)
         self._update_bounds(x,y)
         if cairo: self._cctx.move_to(x,y)
 
-    def _line_to(self,x,y):
-        self._update_bounds(x,y)
-        x1,y1 = self._xy
-        self._xy = x,y
-
-        if points_equal(x,y,x1,y1):
-            return
-
-        self._parts.add(
-            self._dwg.line(start=self._m*(x1,y1),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
-        )
-
     @r
     def line_to(self,x,y):
         self._line_to(x,y)
         if cairo: self._cctx.line_to(x,y)
 
+    @r
+    def arc(self,xc,yc,radius,angle1,angle2):
+        x1,y1 = radius*math.cos(angle1)+xc,radius*math.sin(angle1)+yc
+        x2,y2 = radius*math.cos(angle2)+xc,radius*math.sin(angle2)+yc
+
+        mx2,my2 = self._m*(x2,y2)
+        self._line_to(x1,y1)
+        self._path.append(
+            f'A {radius:.2f},{radius:.2f} 0 0,0 {mx2:.2f},{my2:.2f}'
+        )
+        #self._line_to(x2,y2) # TODO
+        self._xy = (x2,y2)
+        if cairo: self._cctx.arc(xc,yc,radius,angle1,angle2)
 
     @r
-    def rectangle(self,x,y,width,height):
-        self._update_bounds(x,y)
-        self._update_bounds(x+width,y+height)
-        if cairo: self._cctx.rectangle(x,y,width,height)
-        
+    def arc_negative(self,xc,yc,radius,angle1,angle2):
+        x1,y1 = radius*math.cos(angle1)+xc,radius*math.sin(angle1)+yc
+        x2,y2 = radius*math.cos(angle2)+xc,radius*math.sin(angle2)+yc
+
+        mx2,my2 = self._m*(x2,y2)
+        self._line_to(x1,y1)
+        self._path.append(
+            f'A {radius:.2f},{radius:.2f} 0 0,1 {mx2:.2f},{my2:.2f}'
+        )
+
+        self._xy = (x2,y2)
+        if cairo: self._cctx.arc_negative(xc,yc,radius,angle1,angle2)
+
+    @r
+    def curve_to(self,x1, y1, x2, y2, x3, y3):
+        self._xy = (x3,y3)
+        self._update_bounds(x3,y3)
+        self._line_to(x3,y3) # TODO
+        if cairo: self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
+
+    @r
+    def stroke(self):
+        if self._path:
+            self._parts.add(
+                self._dwg.path(d=' '.join(self._path),stroke="black",stroke_width=self._lw)            
+            )
+            self._path = None
+        else:
+            print('stroke without path')
+        self._xy = (0,0)
+        if cairo: self._cctx.stroke()
+
+    @r
+    def fill(self):
+        self._xy = (0,0)
+        self._path = None
+        if cairo: self._cctx.fill()
 
     @r
     def select_font_face(self,ff):
@@ -186,38 +251,19 @@ class Context:
         if cairo: self._cctx.show_text(text)
 
     @r
-    def arc(self,xc,yc,radius,angle1,angle2):
-        x1,y1 = radius*math.cos(angle1)+xc,radius*math.sin(angle1)+yc
-        x2,y2 = radius*math.cos(angle2)+xc,radius*math.sin(angle2)+yc
+    def rectangle(self,x,y,width,height):
+        self._update_bounds(x,y)
+        self._update_bounds(x+width,y+height)
+        x1,y1 = self._m*(x,y)
+        x2,y2 = self._m*(x+width,y+height)
 
-        # self.line_to(x1,y1)
-        self._xy = (x2,y2)
-        if cairo: self._cctx.arc(xc,yc,radius,angle1,angle2)
+        self._parts.add(
+            self._dwg.rect(xrt=self._m*(x,y),end=self._m*(x,y),stroke="black",stroke_width=self._lw)            
+        )
 
-    @r
-    def arc_negative(self,xc,yc,radius,angle1,angle2):
-        x1,y1 = radius*math.cos(angle1)+xc,radius*math.sin(angle1)+yc
-        x2,y2 = radius*math.cos(angle2)+xc,radius*math.sin(angle2)+yc
+        if cairo: self._cctx.rectangle(x,y,width,height)
 
-        # self.line_to(x1,y1)
-        self._xy = (x2,y2)
-        if cairo: self._cctx.arc_negative(xc,yc,radius,angle1,angle2)
 
-    @r
-    def curve_to(self,x1, y1, x2, y2, x3, y3):
-        self._xy = (x3,y3)
-        self._update_bounds(x3,y3)
-        if cairo: self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
-
-    @r
-    def stroke(self):
-        self._xy = (0,0)
-        if cairo: self._cctx.stroke()
-
-    @r
-    def fill(self):
-        self._xy = (0,0)
-        if cairo: self._cctx.fill()
 
     @r
     def text_extents(self,text):
