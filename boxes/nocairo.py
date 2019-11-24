@@ -45,7 +45,7 @@ class SVGSurface:
 
 def report(func):
 
-    return func
+    #return func
 
     def wrapper(self,*l,**d):
         xy = self._xy
@@ -66,7 +66,7 @@ r = report
 class Context:
     def __init__(self,surface,*al,**ad):
         self._dwg = surface.dwg
-        self._parts = self._dwg.add( self._dwg.g(id='parts',style='fill:yellow') )
+        self._parts = self._dwg.add( self._dwg.g(id='parts',style='fill:none') )
         surface._ctx = self
    
         self._xmin = self._ymin = 100000
@@ -76,7 +76,7 @@ class Context:
         self._actions = []
         self._wrappers = {}      
         self._stack = []
-        self._path = None
+        self._path = []
         self._m = Affine.translation(0,0)
         self._xy = (0,0)
         self._lw = 0
@@ -101,23 +101,26 @@ class Context:
             self._wrappers[key] = self._create_new_wrapper_function(key)
         return self._wrappers[key]
 
-    def _update_bounds(self,*xy):
-        x,y = self._m*xy
-        self._xmin = min(self._xmin,x)
-        self._xmax = max(self._xmax,x)
-        self._ymin = min(self._ymin,y)
-        self._ymax = max(self._ymax,y)
+    def _update_bounds_(self,mx,my):
+        self._xmin = min(self._xmin,mx)
+        self._xmax = max(self._xmax,mx)
+        self._ymin = min(self._ymin,my)
+        self._ymax = max(self._ymax,my)
 
+
+    def _update_bounds(self,*xy): #deprecated
+        x,y = self._m*xy
+        self._update_bounds_(x,y)
+        
     @r
     def save(self):
-        self._stack.append( (self._m, self._xy, self._lw, self._rgb, self._path, self._xy) )
+        self._stack.append( (self._m, self._xy, self._lw, self._rgb, self._xy) )
         self._xy = (0,0)
-        self._path = None
         if cairo: self._cctx.save()
 
     @r
     def restore(self):
-        self._m,self._xy, self._lw, self._rgb, self._path, self._xy = self._stack.pop()
+        self._m,self._xy, self._lw, self._rgb, self._xy = self._stack.pop()
         if cairo: self._cctx.restore()
 
     @r
@@ -148,19 +151,13 @@ class Context:
 
     ## path methods
 
-    def _ensure_path(self):
-        if not self._path:
-            x,y = self._m*self._xy
-            self._path = [ f'M {x:.2f},{y:.2f}' ]
-
     def _line_to(self,x,y):
-        self._update_bounds(x,y)
-        self._ensure_path()
 
         x1,y1 = self._m*self._xy
-
+        self._update_bounds_(x1,y1)
         self._xy = x,y
         x2,y2 = self._m*self._xy
+        self._update_bounds_(x2,y2)
 
         #if points_equal(x2,y2,x1,y1): return
 
@@ -175,7 +172,8 @@ class Context:
     @r
     def move_to(self,x,y):
         self._xy = (x,y)
-        self._update_bounds(x,y)
+        x1,y1 = self._m*self._xy
+        self._path.append( f'M {x1:.2f},{y1:.2f}' )
         if cairo: self._cctx.move_to(x,y)
 
     @r
@@ -193,7 +191,6 @@ class Context:
         self._path.append(
             f'A {radius:.2f},{radius:.2f} 0 0,0 {mx2:.2f},{my2:.2f}'
         )
-        #self._line_to(x2,y2) # TODO
         self._xy = (x2,y2)
         if cairo: self._cctx.arc(xc,yc,radius,angle1,angle2)
 
@@ -203,6 +200,7 @@ class Context:
         x2,y2 = radius*math.cos(angle2)+xc,radius*math.sin(angle2)+yc
 
         mx2,my2 = self._m*(x2,y2)
+        self._update_bounds_(mx2,my2)
         self._line_to(x1,y1)
         self._path.append(
             f'A {radius:.2f},{radius:.2f} 0 0,1 {mx2:.2f},{my2:.2f}'
@@ -214,7 +212,10 @@ class Context:
     @r
     def curve_to(self,x1, y1, x2, y2, x3, y3):
         self._xy = (x3,y3)
-        self._update_bounds(x3,y3)
+        mx1,mx2 = self._m*(x1,y1)
+        mx2,mx3 = self._m*(x2,y2)
+        mx3,mx3 = self._m*(x3,y3)
+        self._update_bounds_(mx3,my3)
         self._line_to(x3,y3) # TODO
         if cairo: self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
 
@@ -224,16 +225,16 @@ class Context:
             self._parts.add(
                 self._dwg.path(d=' '.join(self._path),stroke="black",stroke_width=self._lw)            
             )
-            self._path = None
+            self._path = []
         else:
-            print('stroke without path')
+            pass # print('stroke without path')
         self._xy = (0,0)
         if cairo: self._cctx.stroke()
 
     @r
     def fill(self):
-        self._xy = (0,0)
-        self._path = None
+        self._xy = (0,0) 
+        self._path = [] #TODO
         if cairo: self._cctx.fill()
 
     @r
