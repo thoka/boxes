@@ -11,6 +11,8 @@ except ImportError:
 from affine import Affine 
 from svgwrite import mm 
 
+from random import random
+
 EPS = 1e-2
 PADDING = 10
 
@@ -152,6 +154,7 @@ class Context:
 
     def _svg_color(self):
         r,g,b = self._rgb
+        r,g,b = random(),random(), random()
         return f'rgb({r*255:.0f},{g*255:.0f},{b*255:.0f})'
 
     ## path methods
@@ -159,13 +162,14 @@ class Context:
     def _line_to(self,x,y):
 
         x1,y1 = self._m*self._xy
+        self._xy = x,y
         x2,y2 = self._m*self._xy
         self._update_bounds_(x1,y1)
         self._update_bounds_(x2,y2)
-
-        self._xy = x,y
-
         dx,dy = x2-x1,y2-y1
+
+        self._path.append(f'L {x2:.2f},{y2:.2f}')  
+        return
         if abs(dx)<EPS:
             if abs(dy)>EPS:
                 self._path.append(f'V {y2:.2f}')  
@@ -219,9 +223,9 @@ class Context:
     @r
     def curve_to(self,x1, y1, x2, y2, x3, y3):
         self._xy = (x3,y3)
-        mx1,mx2 = self._m*(x1,y1)
-        mx2,mx3 = self._m*(x2,y2)
-        mx3,mx3 = self._m*(x3,y3)
+        mx1,my1 = self._m*(x1,y1)
+        mx2,my2 = self._m*(x2,y2)
+        mx3,my3 = self._m*(x3,y3)
         self._update_bounds_(mx3,my3)
         self._line_to(x3,y3) # TODO
         if cairo: self._cctx.curve_to(x1,y1,x2,y2,x3,y3)
