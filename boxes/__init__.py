@@ -616,7 +616,12 @@ class Boxes:
             return
 
         self.ctx.stroke()
+
+        if 'render_drawing' in dir(self.surface):
+            self.surface.render_drawing(self.ctx._dwg)
+
         self.ctx = None
+
         self.surface.flush()
         self.surface.finish()
 
@@ -1072,6 +1077,11 @@ class Boxes:
                     self.moveTo(x, 0)
                     self.ctx.scale(-1, 1)
                 self.moveTo(self.spacing / 2.0, self.spacing / 2.0)
+
+        # change to a new part, if possible
+        if 'new_part' in dir(self.ctx):
+            self.ctx.new_part()
+
         return dontdraw
 
     @restore

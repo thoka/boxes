@@ -19,7 +19,8 @@ import subprocess
 import tempfile
 import os
 import re
-from boxes import nocairo as cairo #import cairo
+from boxes import drawing as cairo #import cairo
+# from boxes import nocairo as cairo
 from boxes import svgutil
 
 class PSFile:
@@ -80,7 +81,7 @@ class Formats:
 
     def getSurface(self, fmt, filename):
 
-        width = height = 10000  # mm
+        width = height = 10000  # mm 
 
         if fmt in ("svg", "svg_Ponoko"):
             surface = cairo.SVGSurface(filename, width, height)
