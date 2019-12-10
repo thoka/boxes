@@ -1,8 +1,9 @@
 import math
 from affine import Affine 
+from boxes.extents import Extents
 
 EPS = 1e-4
-PADDING = 3
+PADDING = 10
 
 def points_equal(x1,y1,x2,y2):
    return abs(x1-x2)<EPS and abs(y1-y2)<EPS
@@ -42,6 +43,7 @@ class Drawing:
         self._p.move_to(*xy)
 
     def extents(self):
+        if not self.parts: return Extents() 
         return sum( [ p.extents() for p in self.parts ] )
 
 class Part:
@@ -50,6 +52,7 @@ class Part:
         self.path = []
 
     def extents(self):
+        if not self.pathes: return Extents()
         return sum( [ p.extents() for p in self.pathes ] )
 
     def append(self,*path):
@@ -62,6 +65,7 @@ class Part:
         for p in reversed(self.pathes):
             xy1 = p.path[-1][1:3]
             if points_equal(*xy0,*xy1):
+                #todo: check for same color and linewidth    
                 p.path.extend(self.path[1:])
                 self.path = []
                 return p
@@ -100,6 +104,21 @@ class Path:
         for p in self.path:
             e.add(*p[1:3])
         return e
+
+    def faster_edges(self):
+        for (i,p) in enumerate(self.path):
+            if p[0]=='A' and p[-1]<0:
+                if i<2: continue
+                if i>len(self.path)-2: continue
+                if self.path[i-1][0]=='L' and self.path[i+1][0]=='L':
+                    p11 = self.path[i-2][1:3]
+                    p12 = self.path[i-1][1:3]
+                    p21 = p[1:3]
+                    p22 = self.path[i+1][1:3]
+                    lines_intersect,x,y = line_intersection((p11,p12),(p21,p22))
+                    if lines_intersect:
+                        self.path[i-1]=('L',x,y)
+                        self.path[i] = ('C',x,y,*p12,*p21)
 
 
 class Context:
@@ -245,7 +264,6 @@ class SurfaceMixin:
     def flush(self): pass
     def finish(self): pass
     
-
 class SVGWriteRenderer(SurfaceMixin):
     def __init__(self,fname,width,height):
         self._fname = fname
@@ -265,11 +283,14 @@ class SVGWriteRenderer(SurfaceMixin):
         dwg['height']=f'{h:.2f}mm'
         dwg['viewBox']=f'{extents.xmin-PADDING:.2f} {extents.ymin-PADDING:.2f} {w:.2f} {h:.2f}'
 
-        for i,part in enumerate(drawing.parts):          
-            g = dwg.add( dwg.g(id=f'p-{i}',style='fill:none') )
+        for i,part in enumerate(drawing.parts):         
+            if not part.pathes:
+                continue
+            g = dwg.add( dwg.g(id=f'p-{i}',style='fill:none;stroke-linecap:round;stroke-linejoin:round;') )
             for j,path in enumerate(part.pathes):
                 p = []
                 x,y = 0,0
+                path.faster_edges()
                 for c in path.path:
                     x0,y0=x,y
                     C,x,y = c[0:3]
@@ -326,51 +347,38 @@ class CairoRenderer(SurfaceMixin):
 
 SVGSurface = SVGWriteRenderer
 
-class Extents:
-    __slots__ = "xmin ymin xmax ymax".split()
-
-    def __init__(self,xmin=float('inf'),ymin=float('inf'),xmax=float('-inf'),ymax=float('-inf')):
-        self.xmin = xmin
-        self.ymin = ymin
-        self.xmax = xmax 
-        self.ymax = ymax
-
-    def add(self,x,y):
-        self.xmin = min(self.xmin,x)
-        self.xmax = max(self.xmax,x)
-        self.ymin = min(self.ymin,y)
-        self.ymax = max(self.ymax,y)
-
-    def extend(self,l):
-        for x,y in l:
-            self.add(x,y)
-
-    def __add__(self,extent):
-        return Extents(
-            min(self.xmin,extent.xmin),min(self.ymin,extent.ymin),
-            max(self.xmax,extent.xmax),max(self.ymax,extent.ymax)
-        )
-
-    def __radd__(self,extent):
-        if extent == 0:
-            return Extents(self.xmin,self.ymin,self.xmax,self.ymax)
-        return self.__add__(extent)
-       
-    def get_width(self):
-        return self.xmax-self.xmin
-    
-    def get_height(self):
-        return self.ymax-self.ymin
-
-    width = property(get_width)
-    height = property(get_height)
-    
-    def __repr__(self):
-        return f'Extents ({self.xmin},{self.ymin})-({self.xmax},{self.ymax})'
-
 
 from random import random
 def random_svg_color():
     r,g,b = random(),random(), random()
     return f'rgb({r*255:.0f},{g*255:.0f},{b*255:.0f})'                        
 
+def line_intersection(line1, line2):
+
+    xdiff = (line1[0][0] - line1[1][0], line2[0][0] - line2[1][0])
+    ydiff = (line1[0][1] - line1[1][1], line2[0][1] - line2[1][1])
+
+    def det(a, b):
+        return a[0] * b[1] - a[1] * b[0]
+
+    div = det(xdiff, ydiff)
+    if div == 0:
+       # todo: deal with paralel line intersection / overlay
+       return False,None,None
+
+    d = (det(*line1), det(*line2))
+    x = det(d, xdiff) / div
+    y = det(d, ydiff) / div
+
+    on_segments = (
+      ( x+EPS >= min(line1[0][0],line1[1][0]) ) ,
+      ( x+EPS >= min(line2[0][0],line2[1][0]) ) ,
+      ( x-EPS <= max(line1[0][0],line1[1][0]) ) ,
+      ( x-EPS <= max(line2[0][0],line2[1][0]) ) ,
+      ( y+EPS >= min(line1[0][1],line1[1][1]) ) ,
+      ( y+EPS >= min(line2[0][1],line2[1][1]) ) ,
+      ( y-EPS <= max(line1[0][1],line1[1][1]) ) ,
+      ( y-EPS <= max(line2[0][1],line2[1][1]) ) 
+    )
+
+    return min(on_segments), x, y
