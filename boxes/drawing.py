@@ -5,6 +5,8 @@ from boxes.extents import Extents
 EPS = 1e-4
 PADDING = 10
 
+RANDOMIZE_COLORS = False # enable to ease check for continuity of pathes   
+
 def points_equal(x1,y1,x2,y2):
    return abs(x1-x2)<EPS and abs(y1-y2)<EPS
 
@@ -306,7 +308,8 @@ class SVGWriteRenderer(SurfaceMixin):
                     elif C=='C':
                         x1,y1,x2,y2 = c[3:]
                         p.append( f'C {x1:.2f} {y1:.2f} {x2:.2f} {y2:.2f} {x:.2f} {y:.2f}')
-                color = random_svg_color() # to check for continuity of pathes   
+            
+                color = random_svg_color() if RANDOMIZE_COLORS else rgb_to_svg_color(*path.params['rgb'])
                 if p: #todo: might be empty since text is not implemented yet                    
                     g.add( 
                         dwg.path(d=' '.join(p),
@@ -352,6 +355,10 @@ from random import random
 def random_svg_color():
     r,g,b = random(),random(), random()
     return f'rgb({r*255:.0f},{g*255:.0f},{b*255:.0f})'                        
+
+def rgb_to_svg_color(r,g,b):
+    return f'rgb({r*255:.0f},{g*255:.0f},{b*255:.0f})'                        
+
 
 def line_intersection(line1, line2):
 
