@@ -16,11 +16,15 @@
 #   along with this program.  If not, see <http://www.gnu.org/licenses/>.
 
 # Lernkartenkasten für Lotte
+# this is a slightly changed dividertray
 
 from boxes import Boxes, edges, boolarg
 import math
 
-class FlashCardBox(Boxes):
+
+from boxes.generators.dividertray import DividerTray,SlottedEdgeDescriptions,StraightEdgeDescription,SlotDescription,DividerSlotsEdge
+
+class FlashCardBox(DividerTray):
     """Flashcard box - box with finger holes , slides for dividers and dividers"""
 
     ui_group = "Box"
@@ -249,69 +253,6 @@ class FlashCardBox(Boxes):
 
         return descriptions
 
-    def generate_finger_holes(self):
-        posx = -0.5 * self.thickness
-        for x in self.sx[:-1]:
-            posx += x + self.thickness
-            self.fingerHolesAt(posx, 0, self.h)
-
-    def generate_divider(self, width, height, move, only_one_wall=False):
-        second_tab_width = 0 if only_one_wall else self.thickness
-        total_width = width + self.thickness + second_tab_width
-
-        if self.move(total_width, height, move, True):
-            return
-
-        # Upper edge with a finger notch
-
-        upper_radius = self.divider_upper_notch_radius
-        lower_radius = self.divider_lower_notch_radius
-        upper_third = (width - 2 * upper_radius - 2 * lower_radius) / 3
-
-        # Upper: first tab width
-        self.edge(self.thickness)
-
-        # Upper: divider width (with notch if possible)
-        if upper_third > 0:
-            self.edge(upper_third)
-            self.corner(90, upper_radius)
-            self.edge(self.divider_notch_depth - upper_radius - lower_radius)
-            self.corner(-90, lower_radius)
-            self.edge(upper_third)
-            self.corner(-90, lower_radius)
-            self.edge(self.divider_notch_depth - upper_radius - lower_radius)
-            self.corner(90, upper_radius)
-            self.edge(upper_third)
-        else:
-            # if there isn't enough room for the radius, we don't use it
-            self.edge(width)
-
-        # Upper: second tab width if needed
-        self.edge(second_tab_width)
-
-        # First side, with tab depth only if there is 2 walls
-        self.corner(90)
-        self.edge(self.slot_depth)
-        self.corner(90)
-        self.edge(second_tab_width)
-        self.corner(-90)
-        self.edge(height - self.slot_depth)
-
-        # Lower edge
-        self.corner(90)
-        self.edge(width)
-
-        # Second side, always a tab
-        self.corner(90)
-        self.edge(height - self.slot_depth)
-        self.corner(-90)
-        self.edge(self.thickness)
-        self.corner(90)
-        self.edge(self.slot_depth)
-
-        # Move for next piece
-        self.move(total_width, height, move)
-
 class FingerholeEdge(edges.BaseEdge):
     """Edge with multiple angled rounded slots for dividers"""
 
@@ -347,5 +288,3 @@ class FingerholeEdge(edges.BaseEdge):
         # restore context and redo the move straight
         #self.ctx.restore()
         #self.moveTo(length)
-
-from boxes.generators.dividertray import SlottedEdgeDescriptions,StraightEdgeDescription,SlotDescription,DividerSlotsEdge
