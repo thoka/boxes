@@ -278,7 +278,9 @@ class SVGWriteRenderer(SurfaceMixin):
         w = extents.width+2*PADDING
         h = extents.height+2*PADDING
 
-        dwg = svgwrite.Drawing(filename=self._fname)
+        dwg = svgwrite.Drawing(filename=self._fname,debug=False) 
+        # ToDo: examine, why debug is on without debug=False
+
         #dwg.debug = False
 
         dwg['width']=f'{w:.2f}mm'
